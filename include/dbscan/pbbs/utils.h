@@ -291,14 +291,20 @@ template <class E1, class E2>
 
 template<typename eType>
 bool myCAS(eType* p, eType o, eType n) {
+// Use compiler intrinsic to avoid undefined behaviour from reinterpret_cast to std::atomic*
+// (ARM requires proper atomic instructions for CAS; the cast is not portable)
+#ifdef _MSC_VER
   return std::atomic_compare_exchange_strong_explicit(
     reinterpret_cast<std::atomic<eType>*>(p), &o, n, std::memory_order_acq_rel, std::memory_order_acquire);
+#else
+  return __atomic_compare_exchange(p, &o, &n, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+#endif
 }
 
 template <class ET>
 inline bool writeMin(ET *a, ET b) {
   ET c; bool r=0;
-  do c = *a; 
+  do c = *a;
   // while (c > b && !(r=CAS_GCC(a,c,b)));
   while (c > b &&!(r=myCAS(a,c,b)));
   return r;
