@@ -172,7 +172,11 @@ struct cellHash {
   bool replaceQ(eType c1, eType c2) {return 0;}
 
   bool cas(eType* p, eType o, eType n) {
+#ifdef _MSC_VER
     return std::atomic_compare_exchange_strong_explicit(
       reinterpret_cast<std::atomic<eType>*>(p), &o, n, std::memory_order_acq_rel, std::memory_order_acquire);
+#else
+    return __atomic_compare_exchange(p, &o, &n, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+#endif
   }
 };

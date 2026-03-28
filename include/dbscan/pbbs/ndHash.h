@@ -404,8 +404,12 @@ struct hashSimplePair {
   int cmp(intT v, intT b) {return (v > b) ? 1 : ((v == b) ? 0 : -1);}
   bool replaceQ(eType s, eType s2) {return 0;}//return s.second > s2.second;}
   bool cas(eType* p, eType o, eType n) {
+#ifdef _MSC_VER
     return std::atomic_compare_exchange_strong_explicit(
       reinterpret_cast<std::atomic<eType>*>(p), &o, n, std::memory_order_acq_rel, std::memory_order_acquire);
+#else
+    return __atomic_compare_exchange(p, &o, &n, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+#endif
   }
 };
 
