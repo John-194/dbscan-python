@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include "cell.h"
 #include "point.h"
@@ -77,7 +78,7 @@ struct grid {
   tableT* table=NULL;
   treeT* tree=NULL;
   intT totalPoints;
-  cellBuf **nbrCache;
+  std::atomic<cellBuf*>* nbrCache;
   std::mutex* cacheLocks;
 
   /**
@@ -90,11 +91,11 @@ struct grid {
     r(rr), pMin(pMinn), cellCapacity(cellMax), totalPoints(0) {
 
     cells = newA(cellT, cellCapacity);
-    nbrCache = newA(cellBuf*, cellCapacity);
+    nbrCache = new std::atomic<cellBuf*>[cellCapacity];
     cacheLocks = (std::mutex*) malloc(cellCapacity * sizeof(std::mutex));
     parallel_for(0, cellCapacity, [&](intT i) {
       new (&cacheLocks[i]) std::mutex();
-      nbrCache[i] = NULL;
+      nbrCache[i].store(nullptr, std::memory_order_relaxed);
       cells[i].init();
     });
     numCells = 0;
@@ -107,9 +108,10 @@ struct grid {
     free(cells);
     free(cacheLocks);
     parallel_for(0, cellCapacity, [&](intT i) {
-      if(nbrCache[i]) delete nbrCache[i];
+      auto cached = nbrCache[i].load(std::memory_order_relaxed);
+      if(cached) delete cached;
     });
-    free(nbrCache);
+    delete[] nbrCache;
     if(myHash) delete myHash;
     if(table) {
       table->del();
@@ -147,22 +149,24 @@ struct grid {
                    }
                    return false;};//todo, optimize
     int idx = bait - cells;
-    if (nbrCache[idx]) {
-      auto accum = nbrCache[idx];
-      for (auto accum_i : *accum) {
+    // Acquire ensures vector contents are visible if pointer is non-null
+    auto cached = nbrCache[idx].load(std::memory_order_acquire);
+    if (cached) {
+      for (auto accum_i : *cached) {
         if(fWrap(accum_i)) break;
       }
     } else {
-      // wait for other threads to do their thing then try again
       std::lock_guard<std::mutex> lock(cacheLocks[idx]);
-      if (nbrCache[idx]) {
-        auto accum = nbrCache[idx];
-        for (auto accum_i : *accum) {
+      cached = nbrCache[idx].load(std::memory_order_relaxed);
+      if (cached) {
+        for (auto accum_i : *cached) {
           if (fWrap(accum_i)) break;
         }
       } else {
         floatT hop = sqrt(dim + 3) * 1.0000001;
-        nbrCache[idx] = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, nbrCache[idx]);
+        auto result = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, (cellBuf*)nullptr);
+        // Release ensures vector contents are fully written before pointer is visible
+        nbrCache[idx].store(result, std::memory_order_release);
       }
     }
   }
@@ -176,22 +180,22 @@ struct grid {
                    return false;
                  };
     int idx = bait - cells;
-    if (nbrCache[idx]) {
-      auto accum = nbrCache[idx];
-      for (auto accum_i : *accum) {
+    auto cached = nbrCache[idx].load(std::memory_order_acquire);
+    if (cached) {
+      for (auto accum_i : *cached) {
         if (fWrap(accum_i)) break;
       }
     } else {
-      // wait for other threads to do their thing then try again
       std::lock_guard<std::mutex> lock(cacheLocks[idx]);
-      if (nbrCache[idx]) {
-        auto accum = nbrCache[idx];
-        for (auto accum_i : *accum) {
+      cached = nbrCache[idx].load(std::memory_order_relaxed);
+      if (cached) {
+        for (auto accum_i : *cached) {
           if (fWrap(accum_i)) break;
         }
       } else {
         floatT hop = sqrt(dim + 3) * 1.0000001;
-        nbrCache[bait-cells] = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, nbrCache[idx]);
+        auto result = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, (cellBuf*)nullptr);
+        nbrCache[idx].store(result, std::memory_order_release);
       }
     }
   }
