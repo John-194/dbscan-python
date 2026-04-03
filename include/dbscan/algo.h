@@ -165,67 +165,30 @@ int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, i
   delete G;
 
   //improving cluster representation
+  // O(n) renumbering: cluster IDs are point indices ∈ [0,n), use prefix sum
+  // instead of O(n log n) sort + hash table.
+  auto idMap = newA(intT, n);
+  parallel_for(0, n, [&](intT i) { idMap[i] = 0; });
+  parallel_for(0, n, [&](intT i) {
+    if (cluster[i] >= 0) idMap[cluster[i]] = 1;
+  });
+  sequence::prefixSum(idMap, 0, n); // exclusive: idMap[cid] = sequential ID for cid
+
+  // Remap to sequential IDs (separate buffer to avoid read/write conflict)
   auto cluster2 = newA(intT, n);
-  auto flag = newA(intT, n+1);
-  parallel_for(0, n, [&](intT i){cluster2[i] = cluster[i];});
-  sampleSort(cluster, n, std::less<intT>());
-
-  flag[0] = 1;
-  parallel_for(1, n, [&](intT i){
-                       if (cluster[i] != cluster[i-1])
-                         flag[i] = 1;
-                       else
-                         flag[i] = 0;
-                     });
-  flag[n] = sequence::prefixSum(flag, 0, n);
-
-  // typedef pair<intT,intT> eType;
-  struct myPair {
-    intT first;
-    intT second;  
-    myPair(intT _first, intT _second): first(_first), second(_second) {}
-    myPair(): first(-1), second(-1) {}
-    inline bool operator==(myPair a) {
-    if(a.first==first && a.second== second)
-       return true;
-      else
-       return false;
-    }
-  };
-
-  typedef Table<hashSimplePair<myPair>,intT> tableT;
-  auto T = new tableT(n, hashSimplePair<myPair>());
-  parallel_for(0, n, [&] (intT i) {
-                       if (flag[i] != flag[i+1]) {
-                         // T->insert(make_pair(cluster[i], flag[i]));
-                         T->insert(myPair(cluster[i], flag[i]));
-                       }
-                     });
-
-  if(T->find(-1).second < 0) {
-    parallel_for(0, n, [&](intT i){
-                         cluster2[i] = T->find(cluster2[i]).second;
-                       });
-  } else {
-    parallel_for(0, n, [&](intT i){
-                         if (cluster2[i] > 0)
-                           cluster2[i] = T->find(cluster2[i]).second-1;
-                       });
-  }
+  parallel_for(0, n, [&](intT i) {
+    cluster2[i] = (cluster[i] >= 0) ? idMap[cluster[i]] : cluster[i];
+  });
 
   //restoring order
-  parallel_for(0, n, [&](intT i){
-                       cluster[I[i]] = cluster2[i];
-                     });
-  parallel_for(0, n, [&](intT i){
-                       coreFlagOut[I[i]] = coreFlag[i];
-                     });
+  parallel_for(0, n, [&](intT i) {
+    cluster[I[i]] = cluster2[i];
+    coreFlagOut[I[i]] = coreFlag[i];
+  });
 
   free(I);
   free(cluster2);
-  free(flag);
-  T->del(); // Required to clean-up T's internals
-  delete T;
+  free(idMap);
   free(P);
 #ifdef VERBOSE
   cout << "output-time = " << tt.stop() << endl;
