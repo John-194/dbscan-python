@@ -92,21 +92,19 @@ struct grid {
     cells = newA(cellT, cellCapacity);
     nbrCache = newA(cellBuf*, cellCapacity);
     cacheLocks = (std::mutex*) malloc(cellCapacity * sizeof(std::mutex));
-    parallel_for(0, cellCapacity, [&](intT i) {
-      new (&cacheLocks[i]) std::mutex();
-      nbrCache[i] = NULL;
-      cells[i].init();
-    });
     numCells = 0;
 
     myHash = new cellHashT(pMinn, r);
-    table = new tableT(cellMax*2, cellHash<dim, objT>(myHash));//todo load
+    // Hash table sized for expected number of cells, with safety rebuild
+    // in insertParallel if numCells exceeds the estimate.
+    intT tableHint = std::max((intT)2048, cellMax / 4);
+    table = new tableT(tableHint, cellHash<dim, objT>(myHash));
   }
 
   ~grid() {
     free(cells);
     free(cacheLocks);
-    parallel_for(0, cellCapacity, [&](intT i) {
+    parallel_for(0, numCells, [&](intT i) {
       if(nbrCache[i]) delete nbrCache[i];
     });
     free(nbrCache);
@@ -238,6 +236,19 @@ struct grid {
 
     if (numCells > cellCapacity) {
       cout << "error, grid insert exceeded cell capacity, abort()" << endl;abort();}
+
+    // Rebuild hash table if initial estimate was too small
+    if (numCells > cellCapacity / 8) {
+      table->del(); delete table;
+      table = new tableT(numCells * 2, cellHash<dim, objT>(myHash));
+    }
+
+    // Initialize only the cells that will actually be used
+    parallel_for(0, numCells, [&](intT i) {
+      new (&cacheLocks[i]) std::mutex();
+      nbrCache[i] = NULL;
+      cells[i].init();
+    });
 
     parallel_for(0, nn, [&](intT i) {
 	if (flag[i] != flag[i+1]) {
