@@ -84,15 +84,16 @@ class kdTree {
       queryPt.updateX(i, center[i]);
       pMin1.updateX(i, center[i]-r);
       pMax1.updateX(i, center[i]+r);}
+    floatT rSqr = r * r;
     if(cache) {
       if(!accum) accum = new vecT();
-      root->rangeNeighbor(queryPt, r, pMin1, pMax1, accum);
+      root->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, accum);
 			for (auto accum_i : *accum) {
         if(doTerm(accum_i)) break;
       }
       return accum;
     } else {
-      root->rangeNeighbor(queryPt, r, pMin1, pMax1, term, doTerm);
+      root->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, term, doTerm);
       return NULL;
     }
   }

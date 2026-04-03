@@ -57,7 +57,7 @@ int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, i
                          intT count = 0;
                          auto isCore = [&] (pointT *p) {
                                          if(count >= minPts) return true;
-                                         if(p->distSqr(P[i]) <= epsSqr) {//todo sqrt opt
+                                         if(p->distSqr(P[i]) <= epsSqr) {
                                            count ++;}
                                          return false;};
                          G->nghPointMap(P[i].coordinate(), isCore);
