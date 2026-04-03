@@ -205,9 +205,24 @@ struct grid {
       freeFlag=true;}
 
     parallel_for(0, nn, [&](intT i){I[i] = i;});
+
+    // Pre-compute integer cell coordinates to avoid floor() in every sort comparison
+    auto cellKeys = newA(intT, nn * dim);
+    floatT invR = 1.0 / r;
+    parallel_for(0, nn, [&](intT i) {
+      for (int d = 0; d < dim; d++) {
+        cellKeys[i * dim + d] = (intT)floor((P[i][d] - pMin[d]) * invR);
+      }
+    });
     auto ipLess = [&] (intT a, intT b) {
-                   return pointGridCmp<dim, objT, geoPointT>(P[a], P[b], pMin, r);};
+                    for (int d = 0; d < dim; d++) {
+                      intT ca = cellKeys[a * dim + d];
+                      intT cb = cellKeys[b * dim + d];
+                      if (ca != cb) return ca < cb;
+                    }
+                    return false;};
     sampleSort(I, nn, ipLess);
+    free(cellKeys);
     parallel_for(0, nn, [&](intT i){PP[i] = P[I[i]];});
 
     flag[0] = 1;
