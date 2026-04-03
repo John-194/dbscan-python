@@ -47,11 +47,10 @@ class kdNode {
     }}
 
   inline void boundingBoxParallel() {
-    // intT P = getWorkers()*8;
-    static const intT P = 36 * 8;
+    intT P = getWorkers() * 8;
     intT blockSize = (n+P-1)/P;
-    pointT localMin[P];
-    pointT localMax[P];
+    auto localMin = newA(pointT, P);
+    auto localMax = newA(pointT, P);
     for (intT i=0; i<P; ++i) {
       localMin[i] = pointT(items[0]->coordinate());
       localMax[i] = pointT(items[0]->coordinate());}
@@ -68,6 +67,8 @@ class kdNode {
     for(intT p=0; p<P; ++p) {
       pMin.minCoords(localMin[p].x);
       pMax.maxCoords(localMax[p].x);}
+    free(localMin);
+    free(localMax);
   }
 
   inline intT splitItemSerial(floatT xM) {
