@@ -337,32 +337,20 @@ class fork_join_scheduler {
 #endif
 
   template <typename F>
-  size_t get_granularity(size_t start, size_t end, F f) {
-    size_t done = 0;
-    size_t sz = 1;
-    int ticks = 0;
-    do {
-      sz = std::min(sz, end - (start + done));
-      auto tstart = std::chrono::high_resolution_clock::now();
-      for (size_t i = 0; i < sz; i++) f(start + done + i);
-      auto tstop = std::chrono::high_resolution_clock::now();
-      ticks = static_cast<int>((tstop - tstart).count());
-      done += sz;
-      sz *= 2;
-    } while (ticks < 1000 && done < (end - start));
-    return done;
-  }
-
-  template <typename F>
   void parfor(size_t start, size_t end, F f, size_t granularity = 0,
               bool conservative = false) {
     if (end <= start) return;
+    size_t n = end - start;
     if (granularity == 0) {
-      size_t done = get_granularity(start, end, f);
-      granularity = std::max(done, (end - start) / (128 * sched->num_threads));
-      parfor_(start + done, end, f, granularity, conservative);
-    } else
-      parfor_(start, end, f, granularity, conservative);
+      // Aim for ~4 chunks per thread to balance load without excessive splitting.
+      granularity = std::max<size_t>(1, n / (4 * sched->num_threads));
+    }
+    // Sequential fast-path: skip task machinery for small ranges
+    if (n <= granularity) {
+      for (size_t i = start; i < end; i++) f(i);
+      return;
+    }
+    parfor_(start, end, f, granularity, conservative);
   }
 
  private:
