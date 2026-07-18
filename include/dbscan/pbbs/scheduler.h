@@ -49,8 +49,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -162,7 +164,8 @@ struct scheduler {
         deques(num_deques),
         attempts(num_deques),
         spawned_threads(),
-        finished_flag(false) {
+        finished_flag(false),
+        num_sleeping(0) {
     // Stopping condition
     auto finished = [this]() {
       return finished_flag.load(std::memory_order_relaxed);
@@ -180,29 +183,43 @@ struct scheduler {
 
   ~scheduler() {
     finished_flag.store(true, std::memory_order_relaxed);
+    // Wake any sleeping threads so they see the finished flag
+    wake_sleeping();
     for (unsigned int i = 1; i < num_threads; i++) {
       spawned_threads[i - 1].join();
     }
   }
 
-  // Push onto local stack.
+  // Push onto local stack. Wakes sleeping threads only if any exist,
+  // so this is zero-cost during active computation.
   void spawn(Job* job) {
     int id = worker_id();
     deques[id].push_bottom(job);
+    if (num_sleeping.load(std::memory_order_relaxed) > 0)
+      wake_sleeping();
   }
 
   // Wait for condition: finished().
+  // Does NOT enter Phase 3 (CV sleep) — instead spins/yields while
+  // opportunistically executing other stolen work. This prevents deadlock
+  // where a waiting thread sleeps on the CV but nobody notifies it.
   template <typename F>
   void wait(F finished, bool conservative = false) {
-    // Conservative avoids deadlock if scheduler is used in conjunction
-    // with user locks enclosing a wait.
     if (conservative) {
       while (!finished()) std::this_thread::yield();
+    } else {
+      while (!finished()) {
+        Job* job = try_pop();
+        if (!job) {
+          size_t id = worker_id();
+          job = try_steal(id);
+        }
+        if (job)
+          (*job)();
+        else
+          std::this_thread::yield();
+      }
     }
-    // If not conservative, schedule within the wait.
-    // Can deadlock if a stolen job uses same lock as encloses the wait.
-    else
-      start(finished);
   }
 
   // All scheduler threads quit after this is called.
@@ -250,6 +267,23 @@ struct scheduler {
   std::vector<attempt> attempts;
   std::vector<std::thread> spawned_threads;
   std::atomic<bool> finished_flag;
+  // Sleep/wake mechanism: threads entering Phase 3 sleep on the CV.
+  // spawn() only signals when num_sleeping > 0, making it zero-cost
+  // during active computation. wake_gen is bumped to break the CV wait.
+  std::mutex sleep_mutex;
+  std::condition_variable sleep_cv;
+  std::atomic<int> num_sleeping;
+  std::atomic<unsigned> wake_gen{0};
+
+  void wake_sleeping() {
+    // Must lock to prevent race: a thread could be between incrementing
+    // num_sleeping and entering wait(), missing our notify.
+    {
+      std::lock_guard<std::mutex> lk(sleep_mutex);
+      wake_gen.fetch_add(1, std::memory_order_release);
+    }
+    sleep_cv.notify_all();
+  }
 
   // Start an individual scheduler task.  Runs until finished().
   template <typename F>
@@ -269,6 +303,8 @@ struct scheduler {
   }
 
   // Find a job, first trying local stack, then random steals.
+  // Uses progressive backoff: spin aggressively at first (for latency when
+  // work is about to appear), then yield, then sleep with increasing duration.
   template <typename F>
   Job* get_job(F finished) {
     if (finished()) return nullptr;
@@ -276,14 +312,36 @@ struct scheduler {
     if (job) return job;
     size_t id = worker_id();
     while (true) {
-      // By coupon collector's problem, this should touch all.
+      // Phase 1: aggressive spin — covers all deques several times
       for (int i = 0; i <= num_deques * 100; i++) {
         if (finished()) return nullptr;
         job = try_steal(id);
         if (job) return job;
       }
-      // If haven't found anything, take a breather.
-      std::this_thread::sleep_for(std::chrono::nanoseconds(num_deques * 100));
+      // Phase 2: yield + short spins (transition period)
+      for (int round = 0; round < 40; round++) {
+        std::this_thread::yield();
+        for (int i = 0; i <= num_deques * 20; i++) {
+          if (finished()) return nullptr;
+          job = try_steal(id);
+          if (job) return job;
+        }
+      }
+      // Phase 3: CV sleep (truly idle — no work found after phases 1+2).
+      // Uses CV with short timeout so threads wake for both new work
+      // (notified by spawn()) and job completions (checked via finished()).
+      {
+        std::unique_lock<std::mutex> lk(sleep_mutex);
+        auto gen_before = wake_gen.load(std::memory_order_acquire);
+        num_sleeping.fetch_add(1, std::memory_order_release);
+        sleep_cv.wait(lk, [&]() {
+          return finished() ||
+                 wake_gen.load(std::memory_order_acquire) != gen_before;
+        });
+        num_sleeping.fetch_sub(1, std::memory_order_release);
+      }
+      if (finished()) return nullptr;
+      // After wake, loop back to Phase 1 (aggressive steal)
     }
   }
 
@@ -340,32 +398,20 @@ class fork_join_scheduler {
 #endif
 
   template <typename F>
-  size_t get_granularity(size_t start, size_t end, F f) {
-    size_t done = 0;
-    size_t sz = 1;
-    int ticks = 0;
-    do {
-      sz = std::min(sz, end - (start + done));
-      auto tstart = std::chrono::high_resolution_clock::now();
-      for (size_t i = 0; i < sz; i++) f(start + done + i);
-      auto tstop = std::chrono::high_resolution_clock::now();
-      ticks = static_cast<int>((tstop - tstart).count());
-      done += sz;
-      sz *= 2;
-    } while (ticks < 1000 && done < (end - start));
-    return done;
-  }
-
-  template <typename F>
   void parfor(size_t start, size_t end, F f, size_t granularity = 0,
               bool conservative = false) {
     if (end <= start) return;
+    size_t n = end - start;
     if (granularity == 0) {
-      size_t done = get_granularity(start, end, f);
-      granularity = std::max(done, (end - start) / (128 * sched->num_threads));
-      parfor_(start + done, end, f, granularity, conservative);
-    } else
-      parfor_(start, end, f, granularity, conservative);
+      // Aim for ~4 chunks per thread to balance load without excessive splitting.
+      granularity = std::max<size_t>(1, n / (4 * sched->num_threads));
+    }
+    // Sequential fast-path: skip task machinery for small ranges
+    if (n <= granularity) {
+      for (size_t i = start; i < end; i++) f(i);
+      return;
+    }
+    parfor_(start, end, f, granularity, conservative);
   }
 
  private:

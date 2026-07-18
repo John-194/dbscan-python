@@ -47,11 +47,10 @@ class kdNode {
     }}
 
   inline void boundingBoxParallel() {
-    // intT P = getWorkers()*8;
-    static const intT P = 36 * 8;
+    intT P = getWorkers() * 8;
     intT blockSize = (n+P-1)/P;
-    pointT localMin[P];
-    pointT localMax[P];
+    auto localMin = newA(pointT, P);
+    auto localMax = newA(pointT, P);
     for (intT i=0; i<P; ++i) {
       localMin[i] = pointT(items[0]->coordinate());
       localMax[i] = pointT(items[0]->coordinate());}
@@ -68,6 +67,8 @@ class kdNode {
     for(intT p=0; p<P; ++p) {
       pMin.minCoords(localMin[p].x);
       pMax.maxCoords(localMax[p].x);}
+    free(localMin);
+    free(localMax);
   }
 
   inline intT splitItemSerial(floatT xM) {
@@ -264,6 +265,20 @@ class kdNode {
     return 0; // intersect
   }
 
+  // squared bb distance — avoids sqrt, safe to compare against rSqr thresholds
+  // ternary instead of std::max lets compiler emit maxss/fmax without NaN concerns
+  inline floatT nodeDistanceSqr(nodeT* n2) {
+    floatT rsqr = 0;
+    for (int d = 0; d < dim; ++d) {
+      floatT gapA = pMin[d] - n2->pMax[d];
+      floatT gapB = n2->pMin[d] - pMax[d];
+      floatT gap = gapA > gapB ? gapA : gapB;
+      gap = gap > 0 ? gap : 0;
+      rsqr += gap * gap;
+    }
+    return rsqr;
+  }
+
   //return the far bb distance between n1 and n2
   inline floatT nodeFarDistance(nodeT* n2) {
     floatT result = 0;
@@ -296,44 +311,45 @@ class kdNode {
   }
 
   //vecT need to be vector<objT*>
+  // rSqr is the squared query radius; use distSqr to avoid sqrt per point
   template<class vecT>
-  void rangeNeighbor(pointT queryPt, floatT r, pointT pMin1, pointT pMax1, vecT* accum) {
+  void rangeNeighbor(pointT queryPt, floatT rSqr, pointT pMin1, pointT pMax1, vecT* accum) {
     int relation = boxCompare(pMin1, pMax1, pMin, pMax);
     if (relation == boxInclude) {
       for(intT i=0; i<n; ++i) {
-	if (items[i]->getCoordObj()->dist(queryPt) <= r)
+	if (items[i]->getCoordObj()->distSqr(queryPt) <= rSqr)
 	  accum->push_back(items[i]);
       }
     } else if (relation == boxOverlap) {
       if (isLeaf()) {
         for(intT i=0; i<n; ++i) {
-	  if (items[i]->getCoordObj()->dist(queryPt) <= r &&
+	  if (items[i]->getCoordObj()->distSqr(queryPt) <= rSqr &&
 	      itemInBox(pMin1, pMax1, items[i])) accum->push_back(items[i]);
 	}
       } else {
-        left->rangeNeighbor(queryPt, r, pMin1, pMax1, accum);
-        right->rangeNeighbor(queryPt, r, pMin1, pMax1, accum);}
+        left->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, accum);
+        right->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, accum);}
     }
   }
 
   template<class func, class func2>
-  void rangeNeighbor(pointT queryPt, floatT r, pointT pMin1, pointT pMax1, func term, func2 doTerm) {
+  void rangeNeighbor(pointT queryPt, floatT rSqr, pointT pMin1, pointT pMax1, func term, func2 doTerm) {
     if (term()) return;
     int relation = boxCompare(pMin1, pMax1, pMin, pMax);
     if (relation == boxInclude) {
       for(intT i=0; i<n; ++i) {
-	if (items[i]->getCoordObj()->dist(queryPt) <= r &&
+	if (items[i]->getCoordObj()->distSqr(queryPt) <= rSqr &&
 	    doTerm(items[i])) break;
       }
     } else if (relation == boxOverlap) {
       if (isLeaf()) {
         for(intT i=0; i<n; ++i) {
-	  if (items[i]->getCoordObj()->dist(queryPt) <= r &&
+	  if (items[i]->getCoordObj()->distSqr(queryPt) <= rSqr &&
 		doTerm(items[i])) break;
         }
       } else {
-        left->rangeNeighbor(queryPt, r, pMin1, pMax1, term, doTerm);
-        right->rangeNeighbor(queryPt, r, pMin1, pMax1, term, doTerm);}
+        left->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, term, doTerm);
+        right->rangeNeighbor(queryPt, rSqr, pMin1, pMax1, term, doTerm);}
     }
   }
 
