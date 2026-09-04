@@ -79,6 +79,8 @@ struct Deque {
   // Catches layout issues at compile time on platforms where age_t is not exactly 8 bytes,
   // which would break the lock-free atomic CAS in the work-stealing deque.
   static_assert(sizeof(age_t) == sizeof(int64_t), "age_t must be 8 bytes for atomic CAS");
+  static_assert(std::atomic<age_t>::is_always_lock_free,
+                "age_t CAS must be lock-free, otherwise the deque takes a hidden mutex");
 
   // align to avoid false sharing
   struct alignas(64) padded_job {
