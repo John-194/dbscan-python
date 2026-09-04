@@ -1,4 +1,5 @@
 #include <cmath>
+#include <mutex>
 
 #include "Python.h"
 #include "numpy/arrayobject.h"
@@ -8,9 +9,11 @@
 
 static bool scheduler_initialized = false;
 static PyObject* scheduler_cleanup_weakref = nullptr;
+static std::mutex dbscan_mutex;
 
 static void cleanup_scheduler(PyObject *capsule=nullptr)
 {
+    std::lock_guard<std::mutex> guard(dbscan_mutex);
     if (scheduler_initialized)
     {
         parlay::internal::stop_scheduler();
@@ -108,6 +111,8 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
         Py_DECREF(X);
         return NULL;
     }
+
+    std::lock_guard<std::mutex> guard(dbscan_mutex);
 
     if (!parlay::sequential)
     {
