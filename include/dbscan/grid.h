@@ -214,10 +214,9 @@ struct grid {
 
     // Pre-compute integer cell coordinates to avoid floor() in every sort comparison
     auto cellKeys = newA(intT, nn * dim);
-    floatT invR = 1.0 / r;
     parallel_for(0, nn, [&](intT i) {
       for (int d = 0; d < dim; d++) {
-        cellKeys[i * dim + d] = (intT)floor((P[i][d] - pMin[d]) * invR);
+        cellKeys[i * dim + d] = (intT)floor((P[i][d] - pMin[d]) / r);
       }
     });
     auto ipLess = [&] (intT a, intT b) {
