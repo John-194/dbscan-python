@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include "dbscan/capi.h"
 #include "dbscan/point.h"
 #include "dbscan/shared.h"
 #include "dbscan/grid.h"
@@ -29,7 +30,9 @@ int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, i
 #endif
 
   floatT epsSqr = epsilon*epsilon;
-  pointT pMin = pMinParallel(PRead, n);
+  bool allFinite;
+  pointT pMin = pMinParallel(PRead, n, &allFinite);
+  if (!allFinite) return DBSCAN_ERR_NONFINITE;
 
   auto P = newA(pointT, n);
   // parallel_for(0, n, [&](intT i){P[i] = PRead[i];});

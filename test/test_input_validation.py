@@ -28,3 +28,23 @@ def test_transposed_float32_input():
     ref_labels, ref_core = DBSCAN(np.ascontiguousarray(X, np.float64), eps=0.3, min_samples=5)
     assert np.array_equal(labels, ref_labels)
     assert np.array_equal(core, ref_core)
+
+
+@pytest.mark.parametrize("eps", [0.0, -1.0, float("nan"), float("inf")])
+def test_bad_eps_raises(eps):
+    with pytest.raises(ValueError):
+        DBSCAN(np.zeros((10, 3)), eps=eps, min_samples=5)
+
+
+@pytest.mark.parametrize("min_samples", [0, -3])
+def test_bad_min_samples_raises(min_samples):
+    with pytest.raises(ValueError):
+        DBSCAN(np.zeros((10, 3)), eps=0.3, min_samples=min_samples)
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_non_finite_coordinate_raises(bad):
+    X = np.zeros((10, 3))
+    X[7, 1] = bad
+    with pytest.raises(ValueError):
+        DBSCAN(X, eps=0.3, min_samples=5)

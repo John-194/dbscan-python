@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "Python.h"
 #include "numpy/arrayobject.h"
 #include "dbscan/capi.h"
@@ -71,6 +73,20 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
         return NULL;
     }
 
+    if (!(eps > 0) || !std::isfinite(eps))
+    {
+        PyErr_SetString(PyExc_ValueError, "DBSCAN: eps must be positive and finite");
+        Py_DECREF(X);
+        return NULL;
+    }
+
+    if (min_samples < 1)
+    {
+        PyErr_SetString(PyExc_ValueError, "DBSCAN: min_samples must be >= 1");
+        Py_DECREF(X);
+        return NULL;
+    }
+
     if (n > 100000000)
     {
         PyErr_WarnEx(PyExc_RuntimeWarning, "DBSCAN: large n, the program behavior might be undefined due to overflow", 1);
@@ -86,7 +102,7 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
 
     if (n > 0)
     {
-        DBSCAN(
+        int err = DBSCAN(
             dim,
             n,
             (double*)PyArray_DATA(X),
@@ -95,6 +111,14 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
             (bool*)PyArray_DATA(core_samples),
             (int*)PyArray_DATA(labels)
         );
+        if (err == DBSCAN_ERR_NONFINITE)
+        {
+            PyErr_SetString(PyExc_ValueError, "DBSCAN: input contains NaN or infinity");
+            Py_DECREF(X);
+            Py_DECREF(core_samples);
+            Py_DECREF(labels);
+            return NULL;
+        }
     }
 
     PyObject* result_tuple = PyTuple_Pack(2, labels, core_samples);
