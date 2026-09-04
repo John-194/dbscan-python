@@ -24,6 +24,8 @@
 #ifndef BCCP_CORE_H
 #define BCCP_CORE_H
 
+#include <atomic>
+
 #include "kdTree.h"
 #include "kdNode.h"
 #include "pbbs/parallel.h"
@@ -78,8 +80,8 @@ inline void compBcpCoreHSerial(nodeT* n1, nodeT* n2, floatT* r, intT* coreFlag, 
 }
 
 template<class nodeT, class objT>
-inline void compBcpCoreHBase(nodeT* n1, nodeT* n2, floatT* r, intT* coreFlag, objT* P) {
-  if (n1->nodeDistanceSqr(n2) > *r) return;
+inline void compBcpCoreHBase(nodeT* n1, nodeT* n2, std::atomic<floatT>* r, intT* coreFlag, objT* P) {
+  if (n1->nodeDistanceSqr(n2) > r->load(std::memory_order_relaxed)) return;
 
   if (n1->isLeaf() && n2->isLeaf()) {//basecase
     for (intT i=0; i<n1->size(); ++i) {
@@ -126,8 +128,8 @@ inline void compBcpCoreHBase(nodeT* n1, nodeT* n2, floatT* r, intT* coreFlag, ob
 }
 
 template<class nodeT, class objT>
-inline void compBcpCoreH(nodeT* n1, nodeT* n2, floatT* r, intT* coreFlag, objT* P) {
-  if (n1->nodeDistanceSqr(n2) > *r) return;
+inline void compBcpCoreH(nodeT* n1, nodeT* n2, std::atomic<floatT>* r, intT* coreFlag, objT* P) {
+  if (n1->nodeDistanceSqr(n2) > r->load(std::memory_order_relaxed)) return;
 
   if ((n1->isLeaf() && n2->isLeaf()) || (n1->size()+n2->size() < 2000)) {
     return compBcpCoreHBase(n1, n2, r, coreFlag, P);
@@ -183,9 +185,9 @@ inline bool hasEdge(intT n1, intT n2, intT* coreFlag, objT* P, floatT epsilon, c
     trees[n1] = new treeT(cells[n1].getItem(), cells[n1].size(), false);//todo allocation, parallel
   if (!trees[n2])
     trees[n2] = new treeT(cells[n2].getItem(), cells[n2].size(), false);//todo allocation, parallel
-  floatT r = floatMax();
+  std::atomic<floatT> r(floatMax());
   compBcpCoreH(trees[n1]->rootNode(), trees[n2]->rootNode(), &r, coreFlag, P);
-  return r <= epsilon * epsilon; // r holds squared distance now
+  return r.load(std::memory_order_relaxed) <= epsilon * epsilon;
 }
 
 #endif

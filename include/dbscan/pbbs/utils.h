@@ -22,6 +22,7 @@
 
 #ifndef UTILS_H
 #define UTILS_H
+#include <atomic>
 #include <iostream>
 #include <algorithm>
 #include "parallel.h"
@@ -307,6 +308,14 @@ inline bool writeMin(ET *a, ET b) {
   do c = *a;
   // while (c > b && !(r=CAS_GCC(a,c,b)));
   while (c > b &&!(r=myCAS(a,c,b)));
+  return r;
+}
+
+template <class ET>
+inline bool writeMin(std::atomic<ET> *a, ET b) {
+  ET c = a->load(std::memory_order_relaxed); bool r=0;
+  while (c > b && !(r=a->compare_exchange_weak(c, b, std::memory_order_relaxed,
+                                               std::memory_order_relaxed)));
   return r;
 }
 
