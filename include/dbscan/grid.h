@@ -131,14 +131,15 @@ struct grid {
     return totalPoints;
   }
 
+  static constexpr floatT nbrHop() {return 1.0000001 * sqrt((floatT)(4 * dim - 3));}
+
   inline cellBuf* nbrCacheFor(int idx, cellT* bait) {
     // Acquire ensures vector contents are visible if pointer is non-null
     auto cached = nbrCache[idx].load(std::memory_order_acquire);
     if (cached) return cached;
-    floatT hop = sqrt(dim + 3) * 1.0000001;
     auto fStop = [&](){return false;};
     auto fNone = [&](cellT* cell){return false;};
-    auto mine = tree->rangeNeighbor(bait, r * hop, fStop, fNone, true, (cellBuf*)nullptr);
+    auto mine = tree->rangeNeighbor(bait, r * nbrHop(), fStop, fNone, true, (cellBuf*)nullptr);
     cellBuf* expected = nullptr;
     if (nbrCache[idx].compare_exchange_strong(expected, mine,
                                               std::memory_order_acq_rel,
@@ -152,7 +153,7 @@ struct grid {
   template<class func>
   inline void nghPointMap(floatT* center, func& f) {
     auto bait = getCell(center);//center must be there
-    if (!bait) {
+    if (bait == table->empty || bait < cells || bait >= cells + numCells) {
       cout << "error, nghPointMap mapped to a non-existent point, abort" << endl;
       abort();}
     auto fWrap = [&](cellT* nbr) {
