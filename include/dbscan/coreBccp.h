@@ -25,6 +25,7 @@
 #define BCCP_CORE_H
 
 #include <atomic>
+#include <cassert>
 
 #include "kdTree.h"
 #include "kdNode.h"
@@ -181,10 +182,7 @@ inline bool hasEdge(intT n1, intT n2, intT* coreFlag, objT* P, floatT epsilon, c
     return false;
   }
 
-  if (!trees[n1])
-    trees[n1] = new treeT(cells[n1].getItem(), cells[n1].size(), false);//todo allocation, parallel
-  if (!trees[n2])
-    trees[n2] = new treeT(cells[n2].getItem(), cells[n2].size(), false);//todo allocation, parallel
+  assert(trees[n1] && trees[n2]);
   std::atomic<floatT> r(floatMax());
   compBcpCoreH(trees[n1]->rootNode(), trees[n2]->rootNode(), &r, coreFlag, P);
   return r.load(std::memory_order_relaxed) <= epsilon * epsilon;
