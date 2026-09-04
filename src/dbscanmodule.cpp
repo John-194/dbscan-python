@@ -84,15 +84,18 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
         ensure_scheduler_initialized();
     }
 
-    DBSCAN(
-        dim,
-        n,
-        (double*)PyArray_DATA(X),
-        eps,
-        min_samples,
-        (bool*)PyArray_DATA(core_samples),
-        (int*)PyArray_DATA(labels)
-    );
+    if (n > 0)
+    {
+        DBSCAN(
+            dim,
+            n,
+            (double*)PyArray_DATA(X),
+            eps,
+            min_samples,
+            (bool*)PyArray_DATA(core_samples),
+            (int*)PyArray_DATA(labels)
+        );
+    }
 
     PyObject* result_tuple = PyTuple_Pack(2, labels, core_samples);
     Py_DECREF(X);

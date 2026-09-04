@@ -14,6 +14,7 @@
 
 template<int dim>
 int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, intT* coreFlag, intT* cluster) {
+  if (n <= 0) return 0;
   typedef point<dim> pointT;
   typedef grid<dim, pointT> gridT;
   typedef cell<dim, pointT> cellT;
