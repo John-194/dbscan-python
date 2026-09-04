@@ -24,6 +24,8 @@
 #pragma once
 
 #include <cmath>
+#include <random>
+
 #include "point.h"
 #include "pbbs/parallel.h"
 #include "pbbs/sequence.h"
@@ -46,10 +48,10 @@ struct hashFloatToCell {
   floatT r;
   pointT pMin;
   hashFloatToCell(pointT pMinn, floatT rr): r(rr), pMin(pMinn) {
-    srand(time(NULL));
+    std::mt19937 gen(20200101u);
     for (intT i = 0; i < dim; i++) {
       if(noRandom) randInt[i] = rands[i] % range + 1;
-      else randInt[i] = rand() % range + 1;}
+      else randInt[i] = (intT)(gen() % range) + 1;}
   }
   inline uintT primeHash(intT* x, intT n) {
     unsigned long long temp = 0;
