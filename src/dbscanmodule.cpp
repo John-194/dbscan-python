@@ -64,12 +64,14 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
     if (dim < DBSCAN_MIN_DIMS)
     {
         PyErr_SetString(PyExc_ValueError, "DBSCAN: invalid input data dimensionality (has to >=" Py_STRINGIFY(DBSCAN_MIN_DIMS) ")");
+        Py_DECREF(X);
         return NULL;
     }
 
     if (dim > DBSCAN_MAX_DIMS)
     {
         PyErr_SetString(PyExc_ValueError, "DBSCAN: dimension >" Py_STRINGIFY(DBSCAN_MAX_DIMS) " is not supported");
+        Py_DECREF(X);
         return NULL;
     }
 
@@ -89,11 +91,23 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
 
     if (n > 100000000)
     {
-        PyErr_WarnEx(PyExc_RuntimeWarning, "DBSCAN: large n, the program behavior might be undefined due to overflow", 1);
+        if (PyErr_WarnEx(PyExc_RuntimeWarning, "DBSCAN: large n, the program behavior might be undefined due to overflow", 1) < 0)
+        {
+            Py_DECREF(X);
+            return NULL;
+        }
     }
 
     PyArrayObject* core_samples = (PyArrayObject*)PyArray_SimpleNew(1, &n, NPY_BOOL);
     PyArrayObject* labels = (PyArrayObject*)PyArray_SimpleNew(1, &n, NPY_INT);
+
+    if (core_samples == NULL || labels == NULL)
+    {
+        Py_XDECREF(core_samples);
+        Py_XDECREF(labels);
+        Py_DECREF(X);
+        return NULL;
+    }
 
     if (!parlay::sequential)
     {
