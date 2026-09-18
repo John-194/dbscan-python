@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 
 #include <iostream>
 #include "dbscan/capi.h"
@@ -171,11 +172,14 @@ int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, i
   //improving cluster representation
   // O(n) renumbering: cluster IDs are point indices ∈ [0,n), use prefix sum
   // instead of O(n log n) sort + hash table.
-  auto idMap = newA(intT, n);
-  parallel_for(0, n, [&](intT i) { idMap[i] = 0; });
+  static_assert(std::atomic<intT>::is_always_lock_free && sizeof(std::atomic<intT>) == sizeof(intT),
+                "atomic<intT> must be lock-free and layout-compatible with intT");
+  auto idMapAtomic = newA(std::atomic<intT>, n);
+  parallel_for(0, n, [&](intT i) { idMapAtomic[i].store(0, std::memory_order_relaxed); });
   parallel_for(0, n, [&](intT i) {
-    if (cluster[i] >= 0) idMap[cluster[i]] = 1;
+    if (cluster[i] >= 0) idMapAtomic[cluster[i]].store(1, std::memory_order_relaxed);
   });
+  auto idMap = reinterpret_cast<intT*>(idMapAtomic);
   sequence::prefixSum(idMap, 0, n); // exclusive: idMap[cid] = sequential ID for cid
 
   // Remap to sequential IDs (separate buffer to avoid read/write conflict)
@@ -192,7 +196,7 @@ int DBSCAN(intT n, floatT* PF, double epsilon, intT minPts, bool* coreFlagOut, i
 
   free(I);
   free(cluster2);
-  free(idMap);
+  free(idMapAtomic);
   free(P);
 #ifdef VERBOSE
   cout << "output-time = " << tt.stop() << endl;
