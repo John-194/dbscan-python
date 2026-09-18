@@ -128,7 +128,7 @@ class Table {
     intT h = firstIndex(vkey);
     while (1) {
       eType c;
-      c = TA[h];
+      c = hashStruct.load(&TA[h]);
       // intT cmp;
       // if(c==empty && utils::CAS(&TA[h],c,v)) return 1; 
       if(c==empty && hashStruct.cas(&TA[h],c,v)) return 1; 
@@ -245,13 +245,13 @@ class Table {
   // due to prioritization, can quit early if v is greater than cell
   eType find(kType v) {
     intT h = firstIndex(v);
-    eType c = TA[h];
+    eType c = hashStruct.load(&TA[h]);
     while (1) {
       if (c == empty) return empty;
       else if (!hashStruct.cmp(v,hashStruct.getKey(c)))
 	      return c;
       h = incrementIndex(h);
-      c = TA[h];
+      c = hashStruct.load(&TA[h]);
     }
   }
 
@@ -403,6 +403,17 @@ struct hashSimplePair {
   uintT hash(intT s) { return utils::hash(s);}
   int cmp(intT v, intT b) {return (v > b) ? 1 : ((v == b) ? 0 : -1);}
   bool replaceQ(eType s, eType s2) {return 0;}//return s.second > s2.second;}
+  // Slots are published by cas() from other threads, so the probe read must be atomic too.
+  eType load(eType* p) {
+#ifdef _MSC_VER
+    return std::atomic_load_explicit(reinterpret_cast<std::atomic<eType>*>(p), std::memory_order_acquire);
+#else
+    eType v;
+    __atomic_load(p, &v, __ATOMIC_ACQUIRE);
+    return v;
+#endif
+  }
+
   bool cas(eType* p, eType o, eType n) {
 #ifdef _MSC_VER
     return std::atomic_compare_exchange_strong_explicit(
