@@ -7,14 +7,14 @@
 
 This repository hosts fast parallel DBSCAN clustering code for low dimensional Euclidean space. The code automatically uses the available threads on a parallel shared-memory machine to speedup DBSCAN clustering. It stems from a paper presented in SIGMOD'20: [Theoretically Efficient and Practical Parallel DBSCAN](https://dl.acm.org/doi/10.1145/3318464.3380582).
 
-Our software on 1 thread is on par with all serial state-of-the-art DBSCAN packages, and provides additional speedup via multi-threading. Below, we show a simple benchmark comparing our code with the DBSCAN implementation of Sklearn, tested on a 6-core computer with 2-way hyperthreading using a 2-dimensional data set with 50000 data points, where both implementation uses all available threads. Our implementation is more than **32x** faster. We also show a visualization of the clustering result on a smaller data set.
+This software on 1 thread is on par with all serial state-of-the-art DBSCAN packages, and provides additional speedup via multi-threading. Below, we show a simple benchmark comparing this code with the DBSCAN implementation of Sklearn, tested on a 12-core NVIDIA Jetson AGX Orin using 2-dimensional data sets of 5000 to 500000 points, where both implementations use all available threads. This implementation is **60x to 2000x** faster and uses **10x to 500x** less memory, the gap widening with the data set size. Sklearn runs out of memory at 500000 points on a 61 GB machine. We also show a visualization of the clustering result on a smaller data set.
 
 Data sets with dimensionality 2 - 20 are supported by default, which can be modified by modifying ``DBSCAN_MIN_DIMS`` and ``DBSCAN_MAX_DIMS`` in the [source code](https://github.com/wangyiqiu/dbscan-python/blob/master/include/dbscan/capi.h).
 
-<p float="left">
-<img src="https://raw.githubusercontent.com/wangyiqiu/dbscan-python/0.0.12-dev/compare.png" alt="timing" width="300"/>
-<img src="https://raw.githubusercontent.com/wangyiqiu/dbscan-python/0.0.12-dev/example.png" alt="example" width="300"/>
-</p>
+<img src="benchmark_time.png" alt="timing" width="400"/>
+<img src="benchmark_ram.png" alt="memory" width="400"/>
+<img src="benchmark_efficiency.png" alt="per-core throughput" width="400"/>
+<img src="example.png" alt="example" width="400"/>
 
 ## Tutorial
 
@@ -43,7 +43,17 @@ labels, core_samples_mask = DBSCAN(X, eps=0.3, min_samples=10)
 #### Output
 
 * ``labels``: A length ``n`` Numpy array (``dtype=np.int32``) containing cluster IDs of the data points, in the same ordering as the input data. Noise points are given a pseudo-ID of ``-1``.
-* ``core_samples_mask``: A length ``n`` Numpy array (``dtype=np.bool``) masking the core points, in the same ordering as the input data.
+* ``core_samples_mask``: A length ``n`` Numpy array (``dtype=np.bool_``) masking the core points, in the same ordering as the input data.
+
+#### Sequential mode
+
+``DBSCAN`` uses every available thread by default. Sequential mode runs it on the calling thread instead, which is slower in wall-clock but several times more efficient per core, so it is the better choice when the caller is already running work on every core.
+
+```
+from dbscan import set_sequential, get_sequential
+set_sequential()       # or set_sequential(False) to go back to all threads
+get_sequential()       # -> True
+```
 
 We provide a complete example below that generates a toy data set, computes the DBSCAN clustering, and visualizes the result as shown in the plot above.
 
@@ -159,7 +169,7 @@ Right now, the only two files that are guaranteed to remain in the C/C++ API are
 
 ## Citation
 
-If you use our work in a publication, we would appreciate citations:
+This is a fork. If you use this work in a publication, please cite the original authors:
 
     @inproceedings{wang2020theoretically,
       author = {Wang, Yiqiu and Gu, Yan and Shun, Julian},
