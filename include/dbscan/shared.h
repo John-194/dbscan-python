@@ -23,6 +23,9 @@
 
 #pragma once
 
+#include <cmath>
+#include <random>
+
 #include "point.h"
 #include "pbbs/parallel.h"
 #include "pbbs/sequence.h"
@@ -45,10 +48,10 @@ struct hashFloatToCell {
   floatT r;
   pointT pMin;
   hashFloatToCell(pointT pMinn, floatT rr): r(rr), pMin(pMinn) {
-    srand(time(NULL));
+    std::mt19937 gen(20200101u);
     for (intT i = 0; i < dim; i++) {
       if(noRandom) randInt[i] = rands[i] % range + 1;
-      else randInt[i] = rand() % range + 1;}
+      else randInt[i] = (intT)(gen() % range) + 1;}
   }
   inline uintT primeHash(intT* x, intT n) {
     unsigned long long temp = 0;
@@ -124,22 +127,31 @@ point<dim> pMinSerial(point<dim>* items, intT n) {
 }
 
 template<int dim>
-point<dim> pMinParallel(point<dim>* items, intT n) {
+point<dim> pMinParallel(point<dim>* items, intT n, bool* allFinite) {
   point<dim> pMin = point<dim>(items[0].x);
   intT P = getWorkers() * 8;
   intT blockSize = (n+P-1)/P;
   auto localMin = newA(point<dim>, P);
+  auto localSum = newA(double, P);
   for (intT i=0; i<P; ++i) {
-    localMin[i] = point<dim>(items[0].x);}
+    localMin[i] = point<dim>(items[0].x);
+    localSum[i] = 0;}
   parallel_for(0, P, [&](intT p) {
       intT s = p*blockSize;
       intT e = min((p+1)*blockSize,n);
+      double sum = 0;
       for (intT j=s; j<e; ++j) {
-	localMin[p].minCoords(items[j].x);}
+        localMin[p].minCoords(items[j].x);
+        for (int d = 0; d < dim; ++d) sum += items[j].x[d];}
+      localSum[p] = sum;
     });
   pMin = point<dim>(items[0].x);
+  double sum = 0;
   for(intT p=0; p<P; ++p) {
-    pMin.minCoords(localMin[p].x);}
+    pMin.minCoords(localMin[p].x);
+    sum += localSum[p];}
+  *allFinite = std::isfinite(sum);
   free(localMin);
+  free(localSum);
   return pMin;
 }

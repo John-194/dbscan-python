@@ -79,6 +79,8 @@ struct Deque {
   // Catches layout issues at compile time on platforms where age_t is not exactly 8 bytes,
   // which would break the lock-free atomic CAS in the work-stealing deque.
   static_assert(sizeof(age_t) == sizeof(int64_t), "age_t must be 8 bytes for atomic CAS");
+  static_assert(std::atomic<age_t>::is_always_lock_free,
+                "age_t CAS must be lock-free, otherwise the deque takes a hidden mutex");
 
   // align to avoid false sharing
   struct alignas(64) padded_job {
@@ -92,15 +94,14 @@ struct Deque {
 
   Deque() : bot(0), age(age_t{0, 0}) {}
 
-  void push_bottom(Job* job) {
+  bool push_bottom(Job* job) {
     auto local_bot = bot.load(std::memory_order_acquire);      // atomic load
+    if (local_bot + 1 == q_size) return false;
     deq[local_bot].job.store(job, std::memory_order_release);  // shared store
     local_bot += 1;
-    if (local_bot == q_size) {
-      throw std::runtime_error("internal error: scheduler queue overflow");
-    }
     bot.store(local_bot, std::memory_order_release);  // shared store
     std::atomic_thread_fence(std::memory_order_seq_cst);
+    return true;
   }
 
   Job* pop_top() {
@@ -192,11 +193,12 @@ struct scheduler {
 
   // Push onto local stack. Wakes sleeping threads only if any exist,
   // so this is zero-cost during active computation.
-  void spawn(Job* job) {
+  bool spawn(Job* job) {
     int id = worker_id();
-    deques[id].push_bottom(job);
+    if (!deques[id].push_bottom(job)) return false;
     if (num_sleeping.load(std::memory_order_relaxed) > 0)
       wake_sleeping();
+    return true;
   }
 
   // Wait for condition: finished().
@@ -382,7 +384,11 @@ class fork_join_scheduler {
   template <typename L, typename R>
   void pardo(L left, R right, bool conservative = false) {
     auto right_job = make_job(right);
-    sched->spawn(&right_job);
+    if (!sched->spawn(&right_job)) {
+      left();
+      right();
+      return;
+    }
     left();
     if (sched->try_pop() != nullptr)
       right();

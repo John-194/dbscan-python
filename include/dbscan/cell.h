@@ -20,6 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
+#include <atomic>
 
 #include "shared.h"
 #include "point.h"
@@ -170,6 +171,17 @@ struct cellHash {
   inline int diffCell(floatT* c1, floatT* c2) {return hashF->compareCell(c1, c2);}
 
   bool replaceQ(eType c1, eType c2) {return 0;}
+
+  // Slots are published by cas() from other threads, so the probe read must be atomic too.
+  eType load(eType* p) {
+#ifdef _MSC_VER
+    return std::atomic_load_explicit(reinterpret_cast<std::atomic<eType>*>(p), std::memory_order_acquire);
+#else
+    eType v;
+    __atomic_load(p, &v, __ATOMIC_ACQUIRE);
+    return v;
+#endif
+  }
 
   bool cas(eType* p, eType o, eType n) {
 #ifdef _MSC_VER

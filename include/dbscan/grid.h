@@ -24,7 +24,6 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include "cell.h"
 #include "point.h"
 #include "shared.h"
@@ -79,7 +78,6 @@ struct grid {
   treeT* tree=NULL;
   intT totalPoints;
   std::atomic<cellBuf*>* nbrCache;
-  std::mutex* cacheLocks;
 
   /**
   *   Grid constructor.
@@ -92,8 +90,7 @@ struct grid {
 
     cells = newA(cellT, cellCapacity);
     nbrCache = new std::atomic<cellBuf*>[cellCapacity];
-    cacheLocks = (std::mutex*) malloc(cellCapacity * sizeof(std::mutex));
-    // cacheLocks/nbrCache/cells are initialized lazily in insertParallel over
+    // nbrCache/cells are initialized lazily in insertParallel over
     // numCells only, so nothing to initialize here.
     numCells = 0;
 
@@ -106,7 +103,6 @@ struct grid {
 
   ~grid() {
     free(cells);
-    free(cacheLocks);
     // Only [0, numCells) were initialized in insertParallel; reading beyond
     // that would touch uninitialized atomics.
     parallel_for(0, numCells, [&](intT i) {
@@ -135,13 +131,30 @@ struct grid {
     return totalPoints;
   }
 
+  inline cellBuf* nbrCacheFor(int idx, cellT* bait) {
+    // Acquire ensures vector contents are visible if pointer is non-null
+    auto cached = nbrCache[idx].load(std::memory_order_acquire);
+    if (cached) return cached;
+    floatT hop = sqrt(dim + 3) * 1.0000001;
+    auto fStop = [&](){return false;};
+    auto fNone = [&](cellT* cell){return false;};
+    auto mine = tree->rangeNeighbor(bait, r * hop, fStop, fNone, true, (cellBuf*)nullptr);
+    cellBuf* expected = nullptr;
+    if (nbrCache[idx].compare_exchange_strong(expected, mine,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire)) {
+      return mine;
+    }
+    delete mine;
+    return expected;
+  }
+
   template<class func>
   inline void nghPointMap(floatT* center, func& f) {
     auto bait = getCell(center);//center must be there
     if (!bait) {
       cout << "error, nghPointMap mapped to a non-existent point, abort" << endl;
       abort();}
-    auto fStop = [&](){return false;};
     auto fWrap = [&](cellT* nbr) {
                    if (!nbr->isEmpty()
                        && nbr->actualSize()>0) {
@@ -151,54 +164,21 @@ struct grid {
                    }
                    return false;};//todo, optimize
     int idx = bait - cells;
-    // Acquire ensures vector contents are visible if pointer is non-null
-    auto cached = nbrCache[idx].load(std::memory_order_acquire);
-    if (cached) {
-      for (auto accum_i : *cached) {
-        if(fWrap(accum_i)) break;
-      }
-    } else {
-      std::lock_guard<std::mutex> lock(cacheLocks[idx]);
-      cached = nbrCache[idx].load(std::memory_order_relaxed);
-      if (cached) {
-        for (auto accum_i : *cached) {
-          if (fWrap(accum_i)) break;
-        }
-      } else {
-        floatT hop = sqrt(dim + 3) * 1.0000001;
-        auto result = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, (cellBuf*)nullptr);
-        // Release ensures vector contents are fully written before pointer is visible
-        nbrCache[idx].store(result, std::memory_order_release);
-      }
+    for (auto accum_i : *nbrCacheFor(idx, bait)) {
+      if(fWrap(accum_i)) break;
     }
   }
 
   template<class func>
   inline void nghCellMap(cellT* bait, func& f) {
-    auto fStop = [&](){return false;};
     auto fWrap = [&](cellT* cell){
                    if(!cell->isEmpty())
                      return f(cell);
                    return false;
                  };
     int idx = bait - cells;
-    auto cached = nbrCache[idx].load(std::memory_order_acquire);
-    if (cached) {
-      for (auto accum_i : *cached) {
-        if (fWrap(accum_i)) break;
-      }
-    } else {
-      std::lock_guard<std::mutex> lock(cacheLocks[idx]);
-      cached = nbrCache[idx].load(std::memory_order_relaxed);
-      if (cached) {
-        for (auto accum_i : *cached) {
-          if (fWrap(accum_i)) break;
-        }
-      } else {
-        floatT hop = sqrt(dim + 3) * 1.0000001;
-        auto result = tree->rangeNeighbor(bait, r * hop, fStop, fWrap, true, (cellBuf*)nullptr);
-        nbrCache[idx].store(result, std::memory_order_release);
-      }
+    for (auto accum_i : *nbrCacheFor(idx, bait)) {
+      if (fWrap(accum_i)) break;
     }
   }
 
@@ -214,10 +194,9 @@ struct grid {
 
     // Pre-compute integer cell coordinates to avoid floor() in every sort comparison
     auto cellKeys = newA(intT, nn * dim);
-    floatT invR = 1.0 / r;
     parallel_for(0, nn, [&](intT i) {
       for (int d = 0; d < dim; d++) {
-        cellKeys[i * dim + d] = (intT)floor((P[i][d] - pMin[d]) * invR);
+        cellKeys[i * dim + d] = (intT)floor((P[i][d] - pMin[d]) / r);
       }
     });
     auto ipLess = [&] (intT a, intT b) {
@@ -253,7 +232,6 @@ struct grid {
 
     // Initialize only the cells that will actually be used
     parallel_for(0, numCells, [&](intT i) {
-      new (&cacheLocks[i]) std::mutex();
       nbrCache[i].store(nullptr, std::memory_order_relaxed);
       cells[i].init();
     });

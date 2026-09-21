@@ -1,3 +1,6 @@
+#include <cmath>
+#include <mutex>
+
 #include "Python.h"
 #include "numpy/arrayobject.h"
 #include "dbscan/capi.h"
@@ -6,9 +9,11 @@
 
 static bool scheduler_initialized = false;
 static PyObject* scheduler_cleanup_weakref = nullptr;
+static std::mutex dbscan_mutex;
 
 static void cleanup_scheduler(PyObject *capsule=nullptr)
 {
+    std::lock_guard<std::mutex> guard(dbscan_mutex);
     if (scheduler_initialized)
     {
         parlay::internal::stop_scheduler();
@@ -62,37 +67,78 @@ static PyObject* DBSCAN_py(PyObject* self, PyObject* args, PyObject *kwargs)
     if (dim < DBSCAN_MIN_DIMS)
     {
         PyErr_SetString(PyExc_ValueError, "DBSCAN: invalid input data dimensionality (has to >=" Py_STRINGIFY(DBSCAN_MIN_DIMS) ")");
+        Py_DECREF(X);
         return NULL;
     }
 
     if (dim > DBSCAN_MAX_DIMS)
     {
         PyErr_SetString(PyExc_ValueError, "DBSCAN: dimension >" Py_STRINGIFY(DBSCAN_MAX_DIMS) " is not supported");
+        Py_DECREF(X);
+        return NULL;
+    }
+
+    if (!(eps > 0) || !std::isfinite(eps))
+    {
+        PyErr_SetString(PyExc_ValueError, "DBSCAN: eps must be positive and finite");
+        Py_DECREF(X);
+        return NULL;
+    }
+
+    if (min_samples < 1)
+    {
+        PyErr_SetString(PyExc_ValueError, "DBSCAN: min_samples must be >= 1");
+        Py_DECREF(X);
         return NULL;
     }
 
     if (n > 100000000)
     {
-        PyErr_WarnEx(PyExc_RuntimeWarning, "DBSCAN: large n, the program behavior might be undefined due to overflow", 1);
+        if (PyErr_WarnEx(PyExc_RuntimeWarning, "DBSCAN: large n, the program behavior might be undefined due to overflow", 1) < 0)
+        {
+            Py_DECREF(X);
+            return NULL;
+        }
     }
 
     PyArrayObject* core_samples = (PyArrayObject*)PyArray_SimpleNew(1, &n, NPY_BOOL);
     PyArrayObject* labels = (PyArrayObject*)PyArray_SimpleNew(1, &n, NPY_INT);
+
+    if (core_samples == NULL || labels == NULL)
+    {
+        Py_XDECREF(core_samples);
+        Py_XDECREF(labels);
+        Py_DECREF(X);
+        return NULL;
+    }
+
+    std::lock_guard<std::mutex> guard(dbscan_mutex);
 
     if (!parlay::sequential)
     {
         ensure_scheduler_initialized();
     }
 
-    DBSCAN(
-        dim,
-        n,
-        (double*)PyArray_DATA(X),
-        eps,
-        min_samples,
-        (bool*)PyArray_DATA(core_samples),
-        (int*)PyArray_DATA(labels)
-    );
+    if (n > 0)
+    {
+        int err = DBSCAN(
+            dim,
+            n,
+            (double*)PyArray_DATA(X),
+            eps,
+            min_samples,
+            (bool*)PyArray_DATA(core_samples),
+            (int*)PyArray_DATA(labels)
+        );
+        if (err == DBSCAN_ERR_NONFINITE)
+        {
+            PyErr_SetString(PyExc_ValueError, "DBSCAN: input contains NaN or infinity");
+            Py_DECREF(X);
+            Py_DECREF(core_samples);
+            Py_DECREF(labels);
+            return NULL;
+        }
+    }
 
     PyObject* result_tuple = PyTuple_Pack(2, labels, core_samples);
     Py_DECREF(X);

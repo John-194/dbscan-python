@@ -2,19 +2,20 @@
 #define UNION_FIND_H
 
 //adapted from PBBS
+#include <atomic>
 #include "utils.h"
 #include "parallel.h"
 
 struct unionFind {
 
-  intT *parents;
-  intT *hooks;
+  std::atomic<intT> *parents;
+  std::atomic<intT> *hooks;
 
   unionFind(intT n) {
-    parents = newA(intT, n);
-    parallel_for (0, n, [&](intT i) {parents[i] = intMax();});
-    hooks = newA(intT, n);
-    parallel_for (0, n, [&](intT i) {hooks[i] = intMax();});
+    parents = newA(std::atomic<intT>, n);
+    parallel_for (0, n, [&](intT i) {parents[i].store(intMax(), std::memory_order_relaxed);});
+    hooks = newA(std::atomic<intT>, n);
+    parallel_for (0, n, [&](intT i) {hooks[i].store(intMax(), std::memory_order_relaxed);});
   }
 
   void del() {
@@ -24,11 +25,12 @@ struct unionFind {
 
   inline intT find(intT i) {
     intT j = i;
-    if (parents[j] == intMax()) return j;
-    do j = parents[j];
-    while (parents[j] < intMax());
+    if (parents[j].load(std::memory_order_acquire) == intMax()) return j;
+    do j = parents[j].load(std::memory_order_relaxed);
+    while (parents[j].load(std::memory_order_relaxed) < intMax());
     intT tmp;
-    while((tmp=parents[i])<j){ parents[i]=j; i=tmp;}
+    while((tmp=parents[i].load(std::memory_order_relaxed))<j){
+      parents[i].store(j, std::memory_order_relaxed); i=tmp;}
     return j;
   }
 
@@ -38,9 +40,10 @@ struct unionFind {
       v = find(v);
       if(u == v) break;
       if(u > v) swap(u,v);
-      // if(hooks[u] == intMax() && __sync_bool_compare_and_swap(&hooks[u], intMax(), u)){
-      if(hooks[u] == intMax() && utils::myCAS(&hooks[u], intMax(), u)){
-        parents[u]=v;
+      intT expected = intMax();
+      if(hooks[u].load(std::memory_order_relaxed) == intMax() &&
+         hooks[u].compare_exchange_strong(expected, u, std::memory_order_relaxed, std::memory_order_relaxed)){
+        parents[u].store(v, std::memory_order_release);
         break;
       }}
   }

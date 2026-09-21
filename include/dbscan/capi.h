@@ -14,6 +14,9 @@ dimensions in the data.
 #define DBSCAN_MAX_DIMS 20
 #endif
 
+#define DBSCAN_ERR_DIM 1
+#define DBSCAN_ERR_NONFINITE 2
+
 
 #ifdef __cplusplus
 
