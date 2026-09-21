@@ -7,7 +7,7 @@
 
 This repository hosts fast parallel DBSCAN clustering code for low dimensional Euclidean space. The code automatically uses the available threads on a parallel shared-memory machine to speedup DBSCAN clustering. It stems from a paper presented in SIGMOD'20: [Theoretically Efficient and Practical Parallel DBSCAN](https://dl.acm.org/doi/10.1145/3318464.3380582).
 
-Our software on 1 thread is on par with all serial state-of-the-art DBSCAN packages, and provides additional speedup via multi-threading. Below, we show a simple benchmark comparing our code with the DBSCAN implementation of Sklearn, tested on a 12-core NVIDIA Jetson AGX Orin using 2-dimensional data sets of 5000 to 500000 points, where both implementations use all available threads. Our implementation is **60x to 2000x** faster and uses **10x to 500x** less memory, the gap widening with the data set size. Sklearn runs out of memory at 500000 points on a 61 GB machine. We also show a visualization of the clustering result on a smaller data set.
+This software on 1 thread is on par with all serial state-of-the-art DBSCAN packages, and provides additional speedup via multi-threading. Below, we show a simple benchmark comparing this code with the DBSCAN implementation of Sklearn, tested on a 12-core NVIDIA Jetson AGX Orin using 2-dimensional data sets of 5000 to 500000 points, where both implementations use all available threads. This implementation is **60x to 2000x** faster and uses **10x to 500x** less memory, the gap widening with the data set size. Sklearn runs out of memory at 500000 points on a 61 GB machine. We also show a visualization of the clustering result on a smaller data set.
 
 Data sets with dimensionality 2 - 20 are supported by default, which can be modified by modifying ``DBSCAN_MIN_DIMS`` and ``DBSCAN_MAX_DIMS`` in the [source code](https://github.com/wangyiqiu/dbscan-python/blob/master/include/dbscan/capi.h).
 
@@ -169,7 +169,7 @@ Right now, the only two files that are guaranteed to remain in the C/C++ API are
 
 ## Citation
 
-If you use our work in a publication, we would appreciate citations:
+This is a fork. If you use this work in a publication, please cite the original authors:
 
     @inproceedings{wang2020theoretically,
       author = {Wang, Yiqiu and Gu, Yan and Shun, Julian},
