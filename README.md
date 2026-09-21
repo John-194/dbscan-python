@@ -13,6 +13,7 @@ Data sets with dimensionality 2 - 20 are supported by default, which can be modi
 
 <img src="benchmark_time.png" alt="timing" width="400"/>
 <img src="benchmark_ram.png" alt="memory" width="400"/>
+<img src="benchmark_efficiency.png" alt="per-core throughput" width="400"/>
 <img src="example.png" alt="example" width="400"/>
 
 ## Tutorial
@@ -43,6 +44,16 @@ labels, core_samples_mask = DBSCAN(X, eps=0.3, min_samples=10)
 
 * ``labels``: A length ``n`` Numpy array (``dtype=np.int32``) containing cluster IDs of the data points, in the same ordering as the input data. Noise points are given a pseudo-ID of ``-1``.
 * ``core_samples_mask``: A length ``n`` Numpy array (``dtype=np.bool_``) masking the core points, in the same ordering as the input data.
+
+#### Sequential mode
+
+``DBSCAN`` uses every available thread by default. Sequential mode runs it on the calling thread instead, which is slower in wall-clock but several times more efficient per core, so it is the better choice when the caller is already running work on every core.
+
+```
+from dbscan import set_sequential, get_sequential
+set_sequential()       # or set_sequential(False) to go back to all threads
+get_sequential()       # -> True
+```
 
 We provide a complete example below that generates a toy data set, computes the DBSCAN clustering, and visualizes the result as shown in the plot above.
 
